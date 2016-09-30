@@ -3,4 +3,4 @@ trait KV<K, V> {
     fn get(&self, key: K) -> Result<Option<V>, String>;
 }
 
-pub mod rocksdb;
+pub mod rocksdb_kv;

@@ -2,3 +2,8 @@
 name = "rootmos-bot"
 version = "0.0.1"
 authors = [ "Gustav Behm <gustav.behm@gmail.com>" ]
+build = "build.rs"
+
+[dependencies]
+rocksdb = "0.4.1"
+tempdir = "0.3"
