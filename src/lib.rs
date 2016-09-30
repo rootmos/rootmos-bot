@@ -13,3 +13,5 @@ pub mod hello {
         assert!(hello_string().to_lowercase().contains("world"));
     }
 }
+
+pub mod db;
