@@ -37,13 +37,39 @@ impl db::KV<String, String> for RocksDBKV {
 }
 
 #[test]
+fn get_nonexistent_key_test() {
+    if let Ok(dir) = tempdir::TempDir::new("get_nonexistent_key_test") {
+        let path = dir.path().join("db");
+
+        let db = RocksDBKV::new(path.as_path());
+
+        assert_eq!(db.get("nonexistent key".to_owned()), Ok(None))
+    }
+}
+
+#[test]
 fn put_and_get_key_test() {
     if let Ok(dir) = tempdir::TempDir::new("put_and_get_key_test") {
         let path = dir.path().join("db");
 
         let db = RocksDBKV::new(path.as_path());
 
+        assert_eq!(db.get("key".to_owned()), Ok(None));
         assert_eq!(db.put("key".to_owned(), "value".to_owned()), Ok(()));
         assert_eq!(db.get("key".to_owned()), Ok(Some("value".to_owned())))
+    }
+}
+
+#[test]
+fn overwrite_key_test() {
+    if let Ok(dir) = tempdir::TempDir::new("overwrite_key_test") {
+        let path = dir.path().join("db");
+
+        let db = RocksDBKV::new(path.as_path());
+
+        assert_eq!(db.put("key".to_owned(), "value1".to_owned()), Ok(()));
+        assert_eq!(db.get("key".to_owned()), Ok(Some("value1".to_owned())));
+        assert_eq!(db.put("key".to_owned(), "value2".to_owned()), Ok(()));
+        assert_eq!(db.get("key".to_owned()), Ok(Some("value2".to_owned())))
     }
 }
