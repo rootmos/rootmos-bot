@@ -15,3 +15,4 @@ pub mod hello {
 }
 
 pub mod db;
+pub mod free_runner;
