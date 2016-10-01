@@ -14,16 +14,16 @@ impl RocksDBKV {
         RocksDBKV { rocks_db: db }
     }
 
-    fn put(&self, key: &String, value: &String) -> Result<(), String> {
+    fn _put(&self, key: &String, value: &String) -> Result<(), String> {
         use self::rocksdb::Writable;
         self.rocks_db.put(key.as_bytes(), value.as_bytes())
     }
 
-    fn get(&self, key: &String) -> Result<Option<String>, String> {
+    fn _get(&self, key: &String) -> Result<Option<String>, String> {
         self.rocks_db.get(key.as_bytes()).map(|ob| ob.and_then(|b| b.to_utf8().map(|x| x.to_owned())))
     }
 
-    fn get_prefix(&self, prefix: &String) -> Vec<(String, String)> {
+    fn _get_prefix(&self, prefix: &String) -> Vec<(String, String)> {
         use self::rocksdb::{Direction, IteratorMode};
         self.rocks_db.iterator(IteratorMode::From(prefix.as_bytes(), Direction::Forward))
             .map(|p| (String::from_utf8(p.0.into_vec()).unwrap(), String::from_utf8(p.1.into_vec()).unwrap()))
@@ -31,17 +31,17 @@ impl RocksDBKV {
             .collect::<Vec<(String, String)>>()
     }
 
-    fn remove(&self, key: &String) -> Result<(), String> {
+    fn _remove(&self, key: &String) -> Result<(), String> {
         use self::rocksdb::Writable;
         self.rocks_db.delete(key.as_bytes())
     }
 }
 
 impl db::KV<String, String> for RocksDBKV {
-    fn put(&self, key: &String, value: &String) -> Result<(), String> { self.put(key, value) }
-    fn get(&self, key: &String) -> Result<Option<String>, String> { self.get(key) }
-    fn get_prefix(&self, prefix: &String) -> Vec<(String, String)> { self.get_prefix(prefix) }
-    fn remove(&self, key: &String) -> Result<(), String> { self.remove(key) }
+    fn put(&mut self, key: &String, value: &String) -> Result<(), String> { self._put(key, value) }
+    fn get(&self, key: &String) -> Result<Option<String>, String> { self._get(key) }
+    fn get_prefix(&self, prefix: &String) -> Vec<(String, String)> { self._get_prefix(prefix) }
+    fn remove(&mut self, key: &String) -> Result<(), String> { self._remove(key) }
 }
 
 
