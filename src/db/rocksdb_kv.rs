@@ -24,6 +24,14 @@ impl RocksDBKV {
     fn get(&self, key: String) -> Result<Option<String>, String> {
         self.rocks_db.get(key.as_bytes()).map(|ob| ob.and_then(|b| b.to_utf8().map(|x| x.to_owned())))
     }
+
+    fn get_prefix(&self, prefix: String) -> Vec<(String, String)> {
+        use self::rocksdb::{Direction, IteratorMode};
+        self.rocks_db.iterator(IteratorMode::From(prefix.as_bytes(), Direction::Forward))
+            .map(|p| (String::from_utf8(p.0.into_vec()).unwrap(), String::from_utf8(p.1.into_vec()).unwrap()))
+            .take_while(|p| p.0.starts_with(&prefix))
+            .collect::<Vec<(String, String)>>()
+    }
 }
 
 impl db::KV<String, String> for RocksDBKV {
@@ -71,5 +79,23 @@ fn overwrite_key_test() {
         assert_eq!(db.get("key".to_owned()), Ok(Some("value1".to_owned())));
         assert_eq!(db.put("key".to_owned(), "value2".to_owned()), Ok(()));
         assert_eq!(db.get("key".to_owned()), Ok(Some("value2".to_owned())))
+    }
+}
+
+#[test]
+fn fetch_keys_by_prefix_test() {
+    if let Ok(dir) = tempdir::TempDir::new("fetch_keys_by_prefix_test") {
+        let path = dir.path().join("db");
+
+        let db = RocksDBKV::new(path.as_path());
+
+        assert_eq!(db.put("a_key".to_owned(), "not-in-set1".to_owned()), Ok(()));
+        assert_eq!(db.put("key1".to_owned(), "value1".to_owned()), Ok(()));
+        assert_eq!(db.put("key2".to_owned(), "value2".to_owned()), Ok(()));
+        assert_eq!(db.put("z_key".to_owned(), "not-in-set2".to_owned()), Ok(()));
+
+        assert_eq!(
+            db.get_prefix("key".to_owned()),
+            vec![("key1".to_owned(), "value1".to_owned()), ("key2".to_owned(), "value2".to_owned())])
     }
 }
