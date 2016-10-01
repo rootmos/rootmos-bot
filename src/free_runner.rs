@@ -97,18 +97,15 @@ pub fn event<E>(e: E) -> Option<E> {
 
 #[cfg(test)]
 mod test {
-    extern crate time;
     use free_runner::*;
     use std::time::Duration;
 
     enum TestEvent {
         Foo(u32),
-        Bar(String),
     }
 
     enum TestEffect {
         Increment(u32),
-        AppendBar(String),
     }
 
     #[test]
@@ -120,7 +117,6 @@ mod test {
         };
         let g = |eff| match eff {
             TestEffect::Increment(i) => event(TestEvent::Foo(i+1)),
-            _ => noop(),
         };
         let runner = Runner::new(f, g);
         runner.send(TestEvent::Foo(7)).unwrap();
