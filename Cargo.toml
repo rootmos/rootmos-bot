@@ -7,3 +7,4 @@ build = "build.rs"
 [dependencies]
 rocksdb = "0.4.1"
 tempdir = "0.3"
+rand = "0.3"
