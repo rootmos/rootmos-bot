@@ -18,6 +18,13 @@ pub fn overwrite_key_test<K: Eq + Debug, V: Eq + Debug, T: db::KV<K, V>>(db: T, 
     assert_eq!(db.get(&k), Ok(Some(v2)))
 }
 
+pub fn remove_key_test<K: Eq + Debug, V: Eq + Debug, T: db::KV<K, V>>(db: T, k: K, v: V) {
+    assert_eq!(db.put(&k, &v), Ok(()));
+    assert_eq!(db.get(&k), Ok(Some(v)));
+    assert_eq!(db.remove(&k), Ok(()));
+    assert_eq!(db.get(&k), Ok(None))
+}
+
 pub fn fetch_keys_by_prefix_test<K, V, DB, KGen, PKGen, VGen>(db: DB, prefix: K, non_prefixed_key:  KGen, prefixed_key: PKGen, value: VGen) -> ()
     where K: Eq + Debug + Ord, V: Eq + Debug + Ord,
           KGen: Fn() -> K, PKGen: Fn() -> K, VGen: Fn() -> V,

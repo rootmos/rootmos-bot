@@ -30,12 +30,18 @@ impl RocksDBKV {
             .take_while(|p| p.0.starts_with(prefix))
             .collect::<Vec<(String, String)>>()
     }
+
+    fn remove(&self, key: &String) -> Result<(), String> {
+        use self::rocksdb::Writable;
+        self.rocks_db.delete(key.as_bytes())
+    }
 }
 
 impl db::KV<String, String> for RocksDBKV {
     fn put(&self, key: &String, value: &String) -> Result<(), String> { self.put(key, value) }
     fn get(&self, key: &String) -> Result<Option<String>, String> { self.get(key) }
     fn get_prefix(&self, prefix: &String) -> Vec<(String, String)> { self.get_prefix(prefix) }
+    fn remove(&self, key: &String) -> Result<(), String> { self.remove(key) }
 }
 
 
@@ -60,6 +66,12 @@ mod test {
     fn overwrite_key_test() {
         let db = new_temp_db();
         db::test::overwrite_key_test(db, rand_key(), rand_value(), rand_value())
+    }
+
+    #[test]
+    fn remove_key_test() {
+        let db = new_temp_db();
+        db::test::remove_key_test(db, rand_key(), rand_value())
     }
 
     #[test]
