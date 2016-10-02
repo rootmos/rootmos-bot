@@ -18,7 +18,7 @@ pub enum ChatEffect {
     PrivateMsg { to: String, msg: String },
 }
 
-pub fn run<F>(config: &str, f: F) where F: Fn(Event<ChatEvent>) -> Option<Effect<ChatEffect, ()>> + Send + 'static  {
+pub fn run<F, S: Send + 'static>(config: &str, f: F, s: S) where F: Fn(Event<ChatEvent>, &mut S) -> Option<Effect<ChatEffect, ()>> + Send + 'static  {
     let server = IrcServer::new(config).unwrap();
     server.identify().unwrap();
 
@@ -36,7 +36,7 @@ pub fn run<F>(config: &str, f: F) where F: Fn(Event<ChatEvent>) -> Option<Effect
         }
     };
 
-    let runner = Runner::new(f, handle_chat_effect);
+    let runner = Runner::new(f, handle_chat_effect, s);
 
     for maybe_message in server.iter() {
         let nickname = server.current_nickname();

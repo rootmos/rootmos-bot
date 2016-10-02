@@ -27,15 +27,17 @@ pub struct Runner<Ev, T> {
 }
 
 impl <Ev, T> Runner<Ev, T> {
-    pub fn new<F, G, Eff>(f: F, g: G) -> Runner<Ev, T>
-        where F: Fn(Event<Ev>) -> Option<Effect<Eff, T>> + Send + 'static, G: Fn(Eff) -> Option<Ev> + Send + 'static, T: Send + 'static, Ev: Send + 'static {
+    pub fn new<F, G, Eff, S: Send + 'static>(f: F, g: G, s: S) -> Runner<Ev, T>
+        where F: FnMut(Event<Ev>, &mut S) -> Option<Effect<Eff, T>> + Send + 'static, G: Fn(Eff) -> Option<Ev> + Send + 'static, T: Send + 'static, Ev: Send + 'static {
 
         let (tx, rx) = channel();
         let tx_clone = tx.clone();
         let t = thread::spawn(move || {
+            let mut s2 = s;
+            let mut f2 = f;
             loop {
                 let ev = rx.recv().unwrap();
-                match f(ev) {
+                match f2(ev, &mut s2) {
                     Some(Effect::Return(t)) => return t,
                     Some(Effect::Effect(eff)) => match g(eff) {
                         Some(new_ev) => tx.send(Event::Event { time: now_utc(), event: new_ev }).unwrap(),
@@ -112,7 +114,7 @@ mod test {
 
     #[test]
     fn complete_an_event_into_effect_into_event_loop_test() {
-        let f = |e| match e {
+        let f = |e, _: &mut ()| match e {
             Event::Event { time: _, event: TestEvent::Foo(7) } => effect(TestEffect::Increment(7)),
             Event::Event { time: _, event: TestEvent::Foo(8) } => return_(13),
             _ => noop(),
@@ -120,16 +122,16 @@ mod test {
         let g = |eff| match eff {
             TestEffect::Increment(i) => event(TestEvent::Foo(i+1)),
         };
-        let runner = Runner::new(f, g);
+        let runner = Runner::new(f, g, ());
         runner.send(TestEvent::Foo(7)).unwrap();
         assert_eq!(runner.join().unwrap(), 13)
     }
 
     #[test]
     fn receive_heartbeat_test() {
-        let f = |e| match e { Event::Heartbeat { time: _ } => return_(true), _ => noop() };
+        let f = |e, _: &mut ()| match e { Event::Heartbeat { time: _ } => return_(true), _ => noop() };
         let g = |_: ()| noop::<()>();
-        let mut runner = Runner::new(f, g);
+        let mut runner = Runner::new(f, g, ());
         runner.heartbeats(Duration::from_millis(100));
         assert!(runner.join().unwrap());
     }
