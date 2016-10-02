@@ -1,7 +1,7 @@
 extern crate rootmos_bot;
+use rootmos_bot::free_runner::*;
 
 extern crate irc;
-
 use irc::client::prelude::*;
 use irc::client::data::user::User;
 
@@ -19,46 +19,58 @@ enum ChatEffect {
     PrivateMsg { to: String, msg: String },
 }
 
-fn handle_chat_effect(server: IrcServer) -> Box<Fn(ChatEffect) -> ()> {
-    Box::new(move |eff| {
-        match eff {
-            ChatEffect::ChannelMsg { channel, msg } =>
-                server.send_privmsg(channel.as_str(), msg.as_str()).unwrap(),
-            ChatEffect::PrivateMsg { to, msg } =>
-                server.send_privmsg(to.as_str(), msg.as_str()).unwrap(),
-        }
-    })
+
+fn echo_bot(event: Event<ChatEvent>) -> Option<Effect<ChatEffect, ()>> {
+    println!("Event: {:?}", event);
+    match event {
+        Event::Event { event: ChatEvent::PrivateMsg { from, msg }, .. } =>
+            effect(ChatEffect::PrivateMsg { to: from.clone(), msg: format!("I agree {}, I also: {}", from, msg)}),
+        Event::Event { event: ChatEvent::ChannelMsg { channel, from, msg }, .. } =>
+            effect(ChatEffect::ChannelMsg { channel: channel, msg: format!("Did {} just say: {}", from, msg)}),
+        _  => noop(),
+    }
 }
 
 fn main() {
+
     let server = IrcServer::new("irc-config.json").unwrap();
     server.identify().unwrap();
-    let handler = handle_chat_effect(server.clone());
+
+
+    let server_clone = server.clone();
+    let handle_chat_effect = move |eff| {
+        match eff {
+            ChatEffect::ChannelMsg { channel, msg } => {
+                server_clone.send_privmsg(channel.as_str(), msg.as_str()).unwrap();
+                noop()
+            }
+            ChatEffect::PrivateMsg { to, msg } => {
+                server_clone.send_privmsg(to.as_str(), msg.as_str()).unwrap();
+                noop()
+            }
+        }
+    };
+
+    let runner = Runner::new(echo_bot, handle_chat_effect);
+
     for maybe_message in server.iter() {
         let nickname = server.current_nickname();
         match maybe_message {
             Ok(Message { prefix: Some(ref who), command: Command::PRIVMSG(ref to, ref msg), .. }) if to == nickname => {
                 let nickname = String::from(User::new(who).get_nickname());
-                let ev = ChatEvent::PrivateMsg { from: nickname.clone(), msg: msg.clone() };
-                println!("{:?}", ev);
-                handler(ChatEffect::PrivateMsg { to: nickname.clone(), msg: format!("I agree {}, I also: {}", nickname, msg)})
-
+                runner.send(ChatEvent::PrivateMsg { from: nickname.clone(), msg: msg.clone() }).unwrap()
             },
             Ok(Message { prefix: Some(ref who), command: Command::PRIVMSG(ref to, ref msg), .. }) => {
                 let nickname = String::from(User::new(who).get_nickname());
-                let ev = ChatEvent::ChannelMsg { channel: to.clone(), from: nickname.clone(), msg: msg.clone() };
-                println!("{:?}", ev);
-                handler(ChatEffect::ChannelMsg { channel: to.clone(), msg: format!("Did {} just say: {}", nickname, msg)})
+                runner.send(ChatEvent::ChannelMsg { channel: to.clone(), from: nickname.clone(), msg: msg.clone() }).unwrap()
             },
             Ok(Message { prefix: Some(ref who), command: Command::JOIN(ref channel, _, _), .. }) => {
                 let nickname = String::from(User::new(who).get_nickname());
-                let ev = ChatEvent::JoinedChannel { channel: channel.clone(), who: nickname };
-                println!("{:?}", ev)
+                runner.send(ChatEvent::JoinedChannel { channel: channel.clone(), who: nickname }).unwrap()
             },
             Ok(Message { prefix: Some(ref who), command: Command::PART(ref channel, ref maybe_comment), .. }) => {
                 let nickname = String::from(User::new(who).get_nickname());
-                let ev = ChatEvent::PartedChannel { channel: channel.clone(), who: nickname, comment: maybe_comment.clone() };
-                println!("{:?}", ev)
+                runner.send(ChatEvent::PartedChannel { channel: channel.clone(), who: nickname, comment: maybe_comment.clone() }).unwrap()
             },
             Ok(message) => println!("Unhandled: {}", message),
             Err(err) => println!("{}", err),
