@@ -1,3 +1,5 @@
+#[macro_use] extern crate lazy_static;
+
 extern crate rootmos_bot;
 use rootmos_bot::free_runner::*;
 use rootmos_bot::irc::*;
@@ -24,12 +26,14 @@ fn hash(s: String) -> String {
 
 fn tag_bot<KV>(event: Event<ChatEvent>, kv: &mut KV) -> Option<Effect<ChatEffect, ()>> where KV: db::KV<String, String> {
     println!("Event: {:?}", event);
-    let re = Regex::new(r"(#[a-zA-Z0-9]+)").unwrap();
+    lazy_static! {
+        static ref RE: Regex = Regex::new(r"(\s|^)(#[a-zA-Z0-9]+)(\s|$)").unwrap();
+    }
     match event {
         Event::Event { event: ChatEvent::ChannelMsg { channel, msg, .. }, .. } =>
-            if re.is_match(msg.as_str()) {
-                for cap in re.captures_iter(msg.as_str()) {
-                    match cap.at(0) {
+            if RE.is_match(msg.as_str()) {
+                for cap in RE.captures_iter(msg.as_str()) {
+                    match cap.at(2) {
                         Some(tag) => {
                             let msg_hash = hash(msg.clone());
                             let key = format!("{}-{}-{}", channel, tag, msg_hash);
@@ -59,11 +63,39 @@ fn save_line_without_tag_test() {
 }
 
 #[test]
-fn save_line_with_tag_test() {
+fn ignore_line_with_almost_tags_test() {
+    let mut kv = db::hashmap_kv::HashMapKV::new();
+    let input = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
+        channel: "my_channel".to_owned(),
+        from: "user1".to_owned(),
+        msg: "not#tag #not(a-tag)".to_owned() } };
+
+    assert_eq!(tag_bot(input, &mut kv), None)
+}
+
+#[test]
+fn save_line_with_tag_in_the_middle_test() {
+    let tag = "#tag".to_owned();
+    save_line_with_tag_test(format!("test line {} some more text", tag), tag)
+}
+
+#[test]
+fn save_line_with_tag_at_the_end_test() {
+    let tag = "#tag".to_owned();
+    save_line_with_tag_test(format!("another test line {}", tag), tag)
+}
+
+#[test]
+fn save_line_with_tag_at_the_start_test() {
+    let tag = "#tag".to_owned();
+    save_line_with_tag_test(format!("{} yet another test line", tag), tag)
+}
+
+
+#[cfg(test)]
+fn save_line_with_tag_test(line: String, tag: String) {
     let mut kv = db::hashmap_kv::HashMapKV::new();
     let channel = "my_channel".to_owned();
-    let tag = "#tag";
-    let line = format!("test line {} some more text", tag);
     let input = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
         channel: channel.clone(),
         from: "user1".to_owned(),
