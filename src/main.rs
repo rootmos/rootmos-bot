@@ -1,4 +1,5 @@
-#[macro_use] extern crate lazy_static;
+#[macro_use]
+extern crate lazy_static;
 
 extern crate rootmos_bot;
 use rootmos_bot::free_runner::*;
@@ -7,7 +8,7 @@ use rootmos_bot::db;
 use rootmos_bot::db::KV;
 
 extern crate time;
-use time::now_utc;
+use time::{Tm, now_utc};
 
 extern crate regex;
 use regex::Regex;
@@ -16,15 +17,12 @@ extern crate sha2;
 use sha2::Sha256;
 use sha2::Digest;
 
-use std::path::Path;
+extern crate serde;
+extern crate serde_json;
 
-fn hash(s: String) -> String {
-    let mut hasher = Sha256::new();
-    hasher.input_str(s.as_str());
-    let mut h = hasher.result_str();
-    h.truncate(8);
-    h
-}
+include!(concat!(env!("OUT_DIR"), "/serde_types.rs"));
+
+use std::path::Path;
 
 fn tag_bot<KV>(event: Event<ChatEvent>, kv: &mut KV) -> Option<Effect<ChatEffect, ()>> where KV: db::KV<String, String> {
     println!("Event: {:?}", event);
@@ -34,13 +32,13 @@ fn tag_bot<KV>(event: Event<ChatEvent>, kv: &mut KV) -> Option<Effect<ChatEffect
     }
 
     match event {
-        Event::Event { event: ChatEvent::ChannelMsg { channel, msg, .. }, .. } =>
+        Event::Event { time, event: ChatEvent::ChannelMsg { channel, msg, from } } =>
             if let Some(cap) = LIST_CMD.captures(msg.as_str()) {
                 let tag = cap.at(1).unwrap();
                 effect(list_cmd(channel, tag.to_owned(), kv))
             } else if let Some(cap) = TAGGED.captures(msg.as_str()) {
                 let tag = cap.at(2).unwrap();
-                effect(tag_line(channel, tag.to_owned(), msg.clone(), kv))
+                effect(tag_line(time, from, channel, tag.to_owned(), msg.clone(), kv))
             } else {
                 noop()
             },
@@ -48,22 +46,33 @@ fn tag_bot<KV>(event: Event<ChatEvent>, kv: &mut KV) -> Option<Effect<ChatEffect
     }
 }
 
+fn hash(s: String) -> String {
+    let mut hasher = Sha256::new();
+    hasher.input_str(s.as_str());
+    let mut h = hasher.result_str();
+    h.truncate(8);
+    h
+}
+
 fn list_cmd<KV>(channel: String, tag: String, kv: &KV) -> ChatEffect where KV: db::KV<String, String> {
     let tag_prefix = format!("{}-{}-", channel, tag);
     println!("{}", tag_prefix);
     let mut output = format!("Listing tag: {}", tag);
     for p in kv.get_prefix(&tag_prefix) {
-        output.push_str(p.1.as_str());
+        let tagged_line: TaggedLine = serde_json::from_str(&p.1).unwrap();
+        output.push_str(&tagged_line.line);
         output.push('\n')
 
     }
     ChatEffect::ChannelMsg { channel: channel, msg: output }
 }
 
-fn tag_line<KV>(channel: String, tag: String, line: String, kv: &mut KV) -> ChatEffect where KV: db::KV<String, String> {
+fn tag_line<KV>(time: Tm, user: String, channel: String, tag: String, line: String, kv: &mut KV) -> ChatEffect where KV: db::KV<String, String> {
     let line_hash = hash(line.clone());
     let key = format!("{}-{}-{}", channel, tag, line_hash);
-    kv.put(&key, &line).unwrap();
+    let tagged_line = TaggedLine { time_rfc3339: format!("{}", time.rfc3339()), user: user, line: line };
+    let json = serde_json::to_string(&tagged_line).unwrap();
+    kv.put(&key, &json).unwrap();
     let response = format!("Line tagged, recall using: !list {}", tag);
     ChatEffect::ChannelMsg { channel: channel, msg: response }
 }
@@ -126,7 +135,13 @@ fn save_line_with_tag_test(line: String, tag: String) {
     }
 
     let expected_key = format!("{}-{}-{}", channel, tag, hash(line.clone()));
-    assert_eq!(kv.get(&expected_key).unwrap(), Some(line))
+    match kv.get(&expected_key).unwrap() {
+        Some(raw_data) => {
+            let tagged_line: TaggedLine = serde_json::from_str(&raw_data).unwrap();
+            assert_eq!(tagged_line.line, line)
+        },
+        _ => panic!(),
+    }
 }
 
 #[test]
