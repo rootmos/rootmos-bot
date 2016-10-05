@@ -8,13 +8,13 @@ use std::sync::mpsc::{channel, Sender, SendError};
 use std::time::Duration;
 use std::any::Any;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Event<E> {
     Heartbeat { time: Tm },
     Event { time: Tm, event: E },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Effect<E, T> {
     Return(T),
     Effect(E),

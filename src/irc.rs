@@ -4,7 +4,7 @@ use self::irc::client::data::user::User;
 
 use free_runner::*;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ChatEvent {
     ChannelMsg { channel: String, from: String, msg: String },
     PrivateMsg { from: String, msg: String },
@@ -12,7 +12,7 @@ pub enum ChatEvent {
     PartedChannel { channel: String, who: String, comment: Option<String> },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ChatEffect {
     ChannelMsg { channel: String, msg: String },
     PrivateMsg { to: String, msg: String },
