@@ -27,34 +27,18 @@ fn hash(s: String) -> String {
 fn tag_bot<KV>(event: Event<ChatEvent>, kv: &mut KV) -> Option<Effect<ChatEffect, ()>> where KV: db::KV<String, String> {
     println!("Event: {:?}", event);
     lazy_static! {
-        static ref CMD: Regex = Regex::new(r"^!(list)\s+(#[a-zA-Z0-9]+)$").unwrap();
+        static ref LIST_CMD: Regex = Regex::new(r"^!list\s+(#[a-zA-Z0-9]+)$").unwrap();
         static ref TAGGED: Regex = Regex::new(r"(\s|^)(#[a-zA-Z0-9]+)(\s|$)").unwrap();
     }
+
     match event {
         Event::Event { event: ChatEvent::ChannelMsg { channel, msg, .. }, .. } =>
-            if CMD.is_match(msg.as_str()) {
-                match CMD.captures(msg.as_str()) {
-                    Some(cap) =>
-                        match (cap.at(1), cap.at(2)) {
-                            (Some("list"), Some(tag)) => effect(list_cmd(channel, tag.to_owned(), kv)),
-                            _ => panic!()
-                        },
-                    _ => panic!(),
-                }
-            } else if TAGGED.is_match(msg.as_str()) {
-                match TAGGED.captures(msg.as_str()) {
-                    Some(cap) =>
-                        match cap.at(2) {
-                            Some(tag) => {
-                                let msg_hash = hash(msg.clone());
-                                let key = format!("{}-{}-{}", channel, tag, msg_hash);
-                                kv.put(&key, &msg).unwrap();
-                                effect(ChatEffect::ChannelMsg { channel: channel, msg: "Tagged line".to_owned() })
-                            },
-                            _ => noop(),
-                        },
-                    None => noop(),
-                }
+            if let Some(cap) = LIST_CMD.captures(msg.as_str()) {
+                let tag = cap.at(1).unwrap();
+                effect(list_cmd(channel, tag.to_owned(), kv))
+            } else if let Some(cap) = TAGGED.captures(msg.as_str()) {
+                let tag = cap.at(2).unwrap();
+                effect(tag_line(channel, tag.to_owned(), msg.clone(), kv))
             } else {
                 noop()
             },
@@ -69,6 +53,14 @@ fn list_cmd<KV>(channel: String, tag: String, kv: &KV) -> ChatEffect where KV: d
         Some(p) => ChatEffect::ChannelMsg { channel: channel, msg: p.1.clone() },
         _ => panic!(),
     }
+}
+
+fn tag_line<KV>(channel: String, tag: String, line: String, kv: &mut KV) -> ChatEffect where KV: db::KV<String, String> {
+    let line_hash = hash(line.clone());
+    let key = format!("{}-{}-{}", channel, tag, line_hash);
+    kv.put(&key, &line).unwrap();
+    let response = format!("Tagged line, recall with \"!list {}\".", tag);
+    ChatEffect::ChannelMsg { channel: channel, msg: response }
 }
 
 #[test]
