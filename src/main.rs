@@ -21,7 +21,9 @@ use std::path::Path;
 fn hash(s: String) -> String {
     let mut hasher = Sha256::new();
     hasher.input_str(s.as_str());
-    hasher.result_str()
+    let mut h = hasher.result_str();
+    h.truncate(8);
+    h
 }
 
 fn tag_bot<KV>(event: Event<ChatEvent>, kv: &mut KV) -> Option<Effect<ChatEffect, ()>> where KV: db::KV<String, String> {
@@ -49,17 +51,20 @@ fn tag_bot<KV>(event: Event<ChatEvent>, kv: &mut KV) -> Option<Effect<ChatEffect
 fn list_cmd<KV>(channel: String, tag: String, kv: &KV) -> ChatEffect where KV: db::KV<String, String> {
     let tag_prefix = format!("{}-{}-", channel, tag);
     println!("{}", tag_prefix);
-    match kv.get_prefix(&tag_prefix).get(0) {
-        Some(p) => ChatEffect::ChannelMsg { channel: channel, msg: p.1.clone() },
-        _ => panic!(),
+    let mut output = format!("Listing tag: {}", tag);
+    for p in kv.get_prefix(&tag_prefix) {
+        output.push_str(p.1.as_str());
+        output.push('\n')
+
     }
+    ChatEffect::ChannelMsg { channel: channel, msg: output }
 }
 
 fn tag_line<KV>(channel: String, tag: String, line: String, kv: &mut KV) -> ChatEffect where KV: db::KV<String, String> {
     let line_hash = hash(line.clone());
     let key = format!("{}-{}-{}", channel, tag, line_hash);
     kv.put(&key, &line).unwrap();
-    let response = format!("Tagged line, recall with \"!list {}\".", tag);
+    let response = format!("Line tagged, recall using: !list {}", tag);
     ChatEffect::ChannelMsg { channel: channel, msg: response }
 }
 
@@ -125,7 +130,7 @@ fn save_line_with_tag_test(line: String, tag: String) {
 }
 
 #[test]
-fn recall_tag_test() {
+fn recall_tag_one_line_test() {
     let mut kv = db::hashmap_kv::HashMapKV::new();
     let channel = "my_channel".to_owned();
     let tag = "#tag".to_owned();
@@ -154,6 +159,49 @@ fn recall_tag_test() {
         _ => panic!(),
     }
 }
+
+#[test]
+fn recall_tag_several_lines_test() {
+    let mut kv = db::hashmap_kv::HashMapKV::new();
+    let channel = "my_channel".to_owned();
+    let tag = "#tag".to_owned();
+    let line1 = format!("a test line {}", tag);
+    let line2 = format!("another {} test line", tag);
+    let line3 = format!("{} yet another line", tag);
+
+    run_tag_bot_for_line_in_channel(&channel, &"user1".to_owned(), &line1, &mut kv);
+    run_tag_bot_for_line_in_channel(&channel, &"user2".to_owned(), &line2, &mut kv);
+    run_tag_bot_for_line_in_channel(&channel, &"user3".to_owned(), &line3, &mut kv);
+
+    let recall_cmdline = format!("!list {}", tag);
+    let recall_event = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
+        channel: channel.clone(),
+        from: "user4".to_owned(),
+        msg: recall_cmdline } };
+
+    match tag_bot(recall_event, &mut kv) {
+        Some(Effect::Effect(ChatEffect::ChannelMsg { channel: to_channel, msg })) => {
+            assert_eq!(to_channel, channel);
+            assert!(msg.contains(line1.as_str()));
+            assert!(msg.contains(line2.as_str()));
+            assert!(msg.contains(line3.as_str()))
+        },
+        _ => panic!(),
+    }
+}
+
+#[cfg(test)]
+fn run_tag_bot_for_line_in_channel<KV>(channel: &String, user: &String, line: &String, kv: &mut KV) -> () where KV: db::KV<String, String> {
+    let input = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
+        channel: channel.clone(),
+        from: user.clone(),
+        msg: line.clone() } };
+    match tag_bot(input, kv) {
+        Some(_) => (),
+        _ => panic!(),
+    }
+}
+
 
 fn main() {
     let kv = db::rocksdb_kv::RocksDBKV::new(Path::new("tag_bot_db"));
