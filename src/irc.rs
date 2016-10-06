@@ -14,8 +14,8 @@ pub enum ChatEvent {
 
 #[derive(Debug, PartialEq)]
 pub enum ChatEffect {
-    ChannelMsg { channel: String, msg: String },
-    PrivateMsg { to: String, msg: String },
+    ChannelMsg { channel: String, msg: Vec<String> },
+    PrivateMsg { to: String, msg: Vec<String> },
 }
 
 pub fn run<F, S: Send + 'static>(config: &str, f: F, s: S) where F: Fn(Event<ChatEvent>, &mut S) -> Option<Effect<ChatEffect, ()>> + Send + 'static  {
@@ -26,11 +26,15 @@ pub fn run<F, S: Send + 'static>(config: &str, f: F, s: S) where F: Fn(Event<Cha
     let handle_chat_effect = move |eff| {
         match eff {
             ChatEffect::ChannelMsg { channel, msg } => {
-                server_clone.send_privmsg(channel.as_str(), msg.as_str()).unwrap();
+                for line in msg.iter() {
+                    server_clone.send_privmsg(channel.as_str(), line.as_str()).unwrap();
+                }
                 noop()
             }
             ChatEffect::PrivateMsg { to, msg } => {
-                server_clone.send_privmsg(to.as_str(), msg.as_str()).unwrap();
+                for line in msg.iter() {
+                    server_clone.send_privmsg(to.as_str(), line.as_str()).unwrap();
+                }
                 noop()
             }
         }

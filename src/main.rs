@@ -64,19 +64,16 @@ fn mk_key_prefix(channel: &String, tag: &String) -> String {
 
 
 fn list_cmd<KV>(channel: String, tag: String, kv: &KV) -> ChatEffect where KV: db::KV<String, String> {
-    let mut output = format!("Listing tag: {}", tag);
 
     let tag_prefix = mk_key_prefix(&channel, &tag);
-    let mut lines = kv.get_prefix(&tag_prefix).iter().map(|p| serde_json::from_str(&p.1).unwrap()).collect::<Vec<TaggedLine>>();
-    lines.sort_by(|a, b| a.time.cmp(&b.time));
-    for l in lines {
-        output.push('\n');
-        output.push_str(&format!("{} (by: {}, at: {})",
-                            &l.line,
-                            &l.user,
-                            &l.time.with_timezone(&Local).to_rfc2822()));
-    }
-    ChatEffect::ChannelMsg { channel: channel, msg: output }
+    let mut tagged_lines = kv.get_prefix(&tag_prefix).iter().map(|p| serde_json::from_str(&p.1).unwrap()).collect::<Vec<TaggedLine>>();
+    tagged_lines.sort_by(|a, b| a.time.cmp(&b.time));
+
+    let mut msg = tagged_lines.iter()
+        .map(|l| format!("{} (by: {}, at: {})", &l.line, &l.user, &l.time.with_timezone(&Local).to_rfc2822()))
+        .collect::<Vec<String>>();
+    msg.insert(0, format!("Listing tag: {}", tag));
+    ChatEffect::ChannelMsg { channel: channel, msg: msg }
 }
 
 fn tag_line<KV>(time: DateTime<UTC>, user: String, channel: String, tag: String, line: String, kv: &mut KV) -> ChatEffect where KV: db::KV<String, String> {
@@ -91,7 +88,7 @@ fn tag_line<KV>(time: DateTime<UTC>, user: String, channel: String, tag: String,
         hash: line_hash};
     let json = serde_json::to_string(&tagged_line).unwrap();
     kv.put(&key, &json).unwrap();
-    let response = format!("Line tagged, recall using: !list {}", tag);
+    let response = vec![format!("Line tagged, recall using: !list {}", tag)];
     ChatEffect::ChannelMsg { channel: channel, msg: response }
 }
 
@@ -187,7 +184,8 @@ fn recall_tag_one_line_test() {
     match tag_bot(recall_event, &mut kv) {
         Some(Effect::Effect(ChatEffect::ChannelMsg { channel: to_channel, msg })) => {
             assert_eq!(to_channel, channel);
-            assert!(msg.contains(line.as_str()))
+            assert!(msg[0].contains(tag.as_str()));
+            assert!(msg[1].contains(line.as_str()));
         },
         _ => panic!(),
     }
@@ -226,18 +224,19 @@ fn recall_tag_several_lines_test() {
     match tag_bot(recall_event, &mut kv) {
         Some(Effect::Effect(ChatEffect::ChannelMsg { channel: to_channel, msg })) => {
             assert_eq!(to_channel, channel);
-            let lines = msg.lines().collect::<Vec<&str>>();
-            assert!(lines[1].contains(line1.as_str()));
-            assert!(lines[1].contains(user1.as_str()));
-            assert!(lines[1].contains(&time1.with_timezone(&Local).to_rfc2822()));
+            assert!(msg[0].contains(tag.as_str()));
 
-            assert!(lines[2].contains(line2.as_str()));
-            assert!(lines[2].contains(user2.as_str()));
-            assert!(lines[2].contains(&time2.with_timezone(&Local).to_rfc2822()));
+            assert!(msg[1].contains(line1.as_str()));
+            assert!(msg[1].contains(user1.as_str()));
+            assert!(msg[1].contains(&time1.with_timezone(&Local).to_rfc2822()));
 
-            assert!(lines[3].contains(line3.as_str()));
-            assert!(lines[3].contains(user3.as_str()));
-            assert!(lines[3].contains(&time3.with_timezone(&Local).to_rfc2822()));
+            assert!(msg[2].contains(line2.as_str()));
+            assert!(msg[2].contains(user2.as_str()));
+            assert!(msg[2].contains(&time2.with_timezone(&Local).to_rfc2822()));
+
+            assert!(msg[3].contains(line3.as_str()));
+            assert!(msg[3].contains(user3.as_str()));
+            assert!(msg[3].contains(&time3.with_timezone(&Local).to_rfc2822()));
         },
         _ => panic!(),
     }
