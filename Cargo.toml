@@ -8,7 +8,6 @@ build = "build.rs"
 rocksdb = "0.4.1"
 tempdir = "0.3"
 rand = "0.3"
-time = "0.1"
 schedule_recv = "0.1.0"
 irc = "0.11.4"
 sha2 = "0.1.2"
@@ -16,6 +15,7 @@ regex = "0.1"
 lazy_static = "0.2.1"
 serde = "0.8.11"
 serde_json = "0.8.2"
+chrono = { version = "0.2", features = ["serde"] }
 
 [build-dependencies]
 serde_codegen = "0.8.11"

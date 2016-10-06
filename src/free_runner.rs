@@ -1,17 +1,18 @@
-extern crate time;
 extern crate schedule_recv;
 
 use std::thread;
-use self::time::{Tm, now_utc};
 use std::thread::JoinHandle;
 use std::sync::mpsc::{channel, Sender, SendError};
 use std::time::Duration;
 use std::any::Any;
 
+extern crate chrono;
+use self::chrono::{DateTime, UTC};
+
 #[derive(Debug, PartialEq)]
 pub enum Event<E> {
-    Heartbeat { time: Tm },
-    Event { time: Tm, event: E },
+    Heartbeat { time: DateTime<UTC> },
+    Event { time: DateTime<UTC>, event: E },
 }
 
 #[derive(Debug, PartialEq)]
@@ -40,7 +41,7 @@ impl <Ev, T> Runner<Ev, T> {
                 match f2(ev, &mut s2) {
                     Some(Effect::Return(t)) => return t,
                     Some(Effect::Effect(eff)) => match g(eff) {
-                        Some(new_ev) => tx.send(Event::Event { time: now_utc(), event: new_ev }).unwrap(),
+                        Some(new_ev) => tx.send(Event::Event { time: UTC::now() , event: new_ev }).unwrap(),
                         None => ()
                     },
                     None => ()
@@ -60,7 +61,7 @@ impl <Ev, T> Runner<Ev, T> {
     }
 
     pub fn send(&self, ev: Ev) -> Result<(), SendError<Event<Ev>>> {
-        self.sender.send(Event::Event { time: now_utc(), event: ev })
+        self.sender.send(Event::Event { time: UTC::now(), event: ev })
     }
 
     pub fn heartbeats(&mut self, duration: Duration) -> () where Ev: Send + 'static {
@@ -71,7 +72,7 @@ impl <Ev, T> Runner<Ev, T> {
             let rx = schedule_recv::periodic(duration);
             loop {
                 match rx.recv() {
-                    Ok(_) => match cloned_sender.send(Event::Heartbeat { time: now_utc() }) {
+                    Ok(_) => match cloned_sender.send(Event::Heartbeat { time: UTC::now() }) {
                         Ok(_) => (),
                         Err(_) => return ()
                     },

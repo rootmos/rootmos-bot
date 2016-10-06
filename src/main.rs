@@ -7,8 +7,8 @@ use rootmos_bot::irc::*;
 use rootmos_bot::db;
 use rootmos_bot::db::KV;
 
-extern crate time;
-use time::{Tm, now_utc};
+extern crate chrono;
+use chrono::*;
 
 extern crate regex;
 use regex::Regex;
@@ -54,23 +54,41 @@ fn hash(s: String) -> String {
     h
 }
 
-fn list_cmd<KV>(channel: String, tag: String, kv: &KV) -> ChatEffect where KV: db::KV<String, String> {
-    let tag_prefix = format!("{}-{}-", channel, tag);
-    println!("{}", tag_prefix);
-    let mut output = format!("Listing tag: {}", tag);
-    for p in kv.get_prefix(&tag_prefix) {
-        let tagged_line: TaggedLine = serde_json::from_str(&p.1).unwrap();
-        output.push_str(&tagged_line.line);
-        output.push('\n')
+fn mk_key(channel: &String, tag: &String, hash: &String) -> String {
+    format!("{}{}", mk_key_prefix(channel, tag), hash)
+}
 
+fn mk_key_prefix(channel: &String, tag: &String) -> String {
+    format!("{}-{}-", channel, tag)
+}
+
+
+fn list_cmd<KV>(channel: String, tag: String, kv: &KV) -> ChatEffect where KV: db::KV<String, String> {
+    let mut output = format!("Listing tag: {}", tag);
+
+    let tag_prefix = mk_key_prefix(&channel, &tag);
+    let mut lines = kv.get_prefix(&tag_prefix).iter().map(|p| serde_json::from_str(&p.1).unwrap()).collect::<Vec<TaggedLine>>();
+    lines.sort_by(|a, b| a.time.cmp(&b.time));
+    for l in lines {
+        output.push('\n');
+        output.push_str(&format!("{} (by: {}, at: {})",
+                            &l.line,
+                            &l.user,
+                            &l.time.with_timezone(&Local).to_rfc2822()));
     }
     ChatEffect::ChannelMsg { channel: channel, msg: output }
 }
 
-fn tag_line<KV>(time: Tm, user: String, channel: String, tag: String, line: String, kv: &mut KV) -> ChatEffect where KV: db::KV<String, String> {
+fn tag_line<KV>(time: DateTime<UTC>, user: String, channel: String, tag: String, line: String, kv: &mut KV) -> ChatEffect where KV: db::KV<String, String> {
     let line_hash = hash(line.clone());
-    let key = format!("{}-{}-{}", channel, tag, line_hash);
-    let tagged_line = TaggedLine { time_rfc3339: format!("{}", time.rfc3339()), user: user, line: line };
+    let key = mk_key(&channel, &tag, &line_hash);
+    let tagged_line = TaggedLine {
+        channel: channel.clone(),
+        tag: tag.clone(),
+        time: time,
+        user: user,
+        line: line,
+        hash: line_hash};
     let json = serde_json::to_string(&tagged_line).unwrap();
     kv.put(&key, &json).unwrap();
     let response = format!("Line tagged, recall using: !list {}", tag);
@@ -80,7 +98,7 @@ fn tag_line<KV>(time: Tm, user: String, channel: String, tag: String, line: Stri
 #[test]
 fn save_line_without_tag_test() {
     let mut kv = db::hashmap_kv::HashMapKV::new();
-    let input = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
+    let input = Event::Event { time: UTC::now(), event: ChatEvent::ChannelMsg {
         channel: "my_channel".to_owned(),
         from: "user1".to_owned(),
         msg: "test line tag".to_owned() } };
@@ -91,7 +109,7 @@ fn save_line_without_tag_test() {
 #[test]
 fn ignore_line_with_almost_tags_test() {
     let mut kv = db::hashmap_kv::HashMapKV::new();
-    let input = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
+    let input = Event::Event { time: UTC::now(), event: ChatEvent::ChannelMsg {
         channel: "my_channel".to_owned(),
         from: "user1".to_owned(),
         msg: "not#tag #not(a-tag)".to_owned() } };
@@ -122,7 +140,7 @@ fn save_line_with_tag_at_the_start_test() {
 fn save_line_with_tag_test(line: String, tag: String) {
     let mut kv = db::hashmap_kv::HashMapKV::new();
     let channel = "my_channel".to_owned();
-    let input = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
+    let input = Event::Event { time: UTC::now(), event: ChatEvent::ChannelMsg {
         channel: channel.clone(),
         from: "user1".to_owned(),
         msg: line.clone() } };
@@ -151,7 +169,7 @@ fn recall_tag_one_line_test() {
     let tag = "#tag".to_owned();
     let line = format!("a test line {}", tag);
 
-    let input_line = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
+    let input_line = Event::Event { time: UTC::now(), event: ChatEvent::ChannelMsg {
         channel: channel.clone(),
         from: "user1".to_owned(),
         msg: line.clone() } };
@@ -161,7 +179,7 @@ fn recall_tag_one_line_test() {
     }
 
     let recall_cmdline = format!("!list {}", tag);
-    let recall_event = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
+    let recall_event = Event::Event { time: UTC::now(), event: ChatEvent::ChannelMsg {
         channel: channel.clone(),
         from: "user2".to_owned(),
         msg: recall_cmdline } };
@@ -180,16 +198,27 @@ fn recall_tag_several_lines_test() {
     let mut kv = db::hashmap_kv::HashMapKV::new();
     let channel = "my_channel".to_owned();
     let tag = "#tag".to_owned();
-    let line1 = format!("a test line {}", tag);
-    let line2 = format!("another {} test line", tag);
-    let line3 = format!("{} yet another line", tag);
 
-    run_tag_bot_for_line_in_channel(&channel, &"user1".to_owned(), &line1, &mut kv);
-    run_tag_bot_for_line_in_channel(&channel, &"user2".to_owned(), &line2, &mut kv);
-    run_tag_bot_for_line_in_channel(&channel, &"user3".to_owned(), &line3, &mut kv);
+    let line1 = format!("a test line {}", tag);
+    let time1 = UTC::now() - Duration::hours(3);
+    let user1 = "user1".to_owned();
+    run_tag_bot_for_line_in_channel(&time1, &channel, &user1, &line1, &mut kv);
+
+    let line2 = format!("another {} test line", tag);
+    let time2 = time1 + Duration::hours(1);
+    let user2 = "user2".to_owned();
+    run_tag_bot_for_line_in_channel(&time2, &channel, &user2, &line2, &mut kv);
+
+    let line3 = format!("{} yet another line", tag);
+    let time3 = time2 + Duration::hours(1);
+    let user3 = "user3".to_owned();
+    run_tag_bot_for_line_in_channel(&time3, &channel, &user3, &line3, &mut kv);
+
+    assert!(time1 < time2);
+    assert!(time2 < time3);
 
     let recall_cmdline = format!("!list {}", tag);
-    let recall_event = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
+    let recall_event = Event::Event { time: UTC::now(), event: ChatEvent::ChannelMsg {
         channel: channel.clone(),
         from: "user4".to_owned(),
         msg: recall_cmdline } };
@@ -197,17 +226,26 @@ fn recall_tag_several_lines_test() {
     match tag_bot(recall_event, &mut kv) {
         Some(Effect::Effect(ChatEffect::ChannelMsg { channel: to_channel, msg })) => {
             assert_eq!(to_channel, channel);
-            assert!(msg.contains(line1.as_str()));
-            assert!(msg.contains(line2.as_str()));
-            assert!(msg.contains(line3.as_str()))
+            let lines = msg.lines().collect::<Vec<&str>>();
+            assert!(lines[1].contains(line1.as_str()));
+            assert!(lines[1].contains(user1.as_str()));
+            assert!(lines[1].contains(&time1.with_timezone(&Local).to_rfc2822()));
+
+            assert!(lines[2].contains(line2.as_str()));
+            assert!(lines[2].contains(user2.as_str()));
+            assert!(lines[2].contains(&time2.with_timezone(&Local).to_rfc2822()));
+
+            assert!(lines[3].contains(line3.as_str()));
+            assert!(lines[3].contains(user3.as_str()));
+            assert!(lines[3].contains(&time3.with_timezone(&Local).to_rfc2822()));
         },
         _ => panic!(),
     }
 }
 
 #[cfg(test)]
-fn run_tag_bot_for_line_in_channel<KV>(channel: &String, user: &String, line: &String, kv: &mut KV) -> () where KV: db::KV<String, String> {
-    let input = Event::Event { time: now_utc(), event: ChatEvent::ChannelMsg {
+fn run_tag_bot_for_line_in_channel<KV>(time: &DateTime<UTC>, channel: &String, user: &String, line: &String, kv: &mut KV) -> () where KV: db::KV<String, String> {
+    let input = Event::Event { time: time.clone(), event: ChatEvent::ChannelMsg {
         channel: channel.clone(),
         from: user.clone(),
         msg: line.clone() } };

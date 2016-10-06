@@ -1,6 +1,10 @@
+
 #[derive(Serialize, Deserialize, Debug)]
 struct TaggedLine {
-    time_rfc3339: String,
+    channel: String,
+    tag: String,
     user: String,
+    time: chrono::DateTime<UTC>,
     line: String,
+    hash: String,
 }
