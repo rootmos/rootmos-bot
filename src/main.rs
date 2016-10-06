@@ -28,6 +28,7 @@ fn tag_bot<KV>(event: Event<ChatEvent>, kv: &mut KV) -> Option<Effect<ChatEffect
     println!("Event: {:?}", event);
     lazy_static! {
         static ref LIST_CMD: Regex = Regex::new(r"^!list\s+(#[a-zA-Z0-9]+)$").unwrap();
+        static ref UNTAG_CMD: Regex = Regex::new(r"^!untag\s+(#[a-zA-Z0-9]+)\s+([a-fA-F0-9]+)$").unwrap();
         static ref TAGGED: Regex = Regex::new(r"(\s|^)(#[a-zA-Z0-9]+)(\s|$)").unwrap();
     }
 
@@ -36,6 +37,10 @@ fn tag_bot<KV>(event: Event<ChatEvent>, kv: &mut KV) -> Option<Effect<ChatEffect
             if let Some(cap) = LIST_CMD.captures(msg.as_str()) {
                 let tag = cap.at(1).unwrap();
                 effect(list_cmd(channel, tag.to_owned(), kv))
+            } else if let Some(cap) = UNTAG_CMD.captures(msg.as_str()) {
+                let tag = cap.at(1).unwrap();
+                let hash = cap.at(2).unwrap();
+                effect(untag_cmd(channel, tag.to_owned(), hash.to_owned(), kv))
             } else if let Some(cap) = TAGGED.captures(msg.as_str()) {
                 let tag = cap.at(2).unwrap();
                 effect(tag_line(time, from, channel, tag.to_owned(), msg.clone(), kv))
@@ -46,7 +51,7 @@ fn tag_bot<KV>(event: Event<ChatEvent>, kv: &mut KV) -> Option<Effect<ChatEffect
     }
 }
 
-fn hash(s: String) -> String {
+fn hash(s: &String) -> String {
     let mut hasher = Sha256::new();
     hasher.input_str(s.as_str());
     let mut h = hasher.result_str();
@@ -72,12 +77,12 @@ fn list_cmd<KV>(channel: String, tag: String, kv: &KV) -> ChatEffect where KV: d
     let mut msg = tagged_lines.iter()
         .map(|l| format!("{} (by: {}, at: {})", &l.line, &l.user, &l.time.with_timezone(&Local).to_rfc2822()))
         .collect::<Vec<String>>();
-    msg.insert(0, format!("Listing tag: {}", tag));
+    msg.insert(0, format!("Listing tag {}:", tag));
     ChatEffect::ChannelMsg { channel: channel, msg: msg }
 }
 
 fn tag_line<KV>(time: DateTime<UTC>, user: String, channel: String, tag: String, line: String, kv: &mut KV) -> ChatEffect where KV: db::KV<String, String> {
-    let line_hash = hash(line.clone());
+    let line_hash = hash(&line);
     let key = mk_key(&channel, &tag, &line_hash);
     let tagged_line = TaggedLine {
         channel: channel.clone(),
@@ -90,6 +95,22 @@ fn tag_line<KV>(time: DateTime<UTC>, user: String, channel: String, tag: String,
     kv.put(&key, &json).unwrap();
     let response = vec![format!("Line tagged, recall using: !list {}", tag)];
     ChatEffect::ChannelMsg { channel: channel, msg: response }
+}
+
+fn untag_cmd<KV>(channel: String, tag: String, hash: String, kv: &mut KV) -> ChatEffect where KV: db::KV<String, String> {
+    let key = mk_key(&channel, &tag, &hash);
+    match kv.get(&key).unwrap() {
+        Some(json) => {
+            kv.remove(&key).unwrap();
+            let tl: TaggedLine = serde_json::from_str(json.as_str()).unwrap();
+            let msg = vec![format!("Removed tag {} from line: {}", tag, tl.line)];
+            ChatEffect::ChannelMsg { channel: channel, msg: msg }
+        },
+        None => {
+            let error = format!("Unable to find line tagged with {} and with hash {}", tag, hash);
+            ChatEffect::ChannelMsg { channel: channel, msg: vec![error] }
+        },
+    }
 }
 
 #[test]
@@ -149,7 +170,7 @@ fn save_line_with_tag_test(line: String, tag: String) {
         _ => panic!(),
     }
 
-    let expected_key = format!("{}-{}-{}", channel, tag, hash(line.clone()));
+    let expected_key = format!("{}-{}-{}", channel, tag, hash(&line));
     match kv.get(&expected_key).unwrap() {
         Some(raw_data) => {
             let tagged_line: TaggedLine = serde_json::from_str(&raw_data).unwrap();
@@ -224,7 +245,7 @@ fn recall_tag_several_lines_test() {
     match tag_bot(recall_event, &mut kv) {
         Some(Effect::Effect(ChatEffect::ChannelMsg { channel: to_channel, msg })) => {
             assert_eq!(to_channel, channel);
-            assert!(msg[0].contains(tag.as_str()));
+            assert_eq!(msg[0], format!("Listing tag {}:", tag));
 
             assert!(msg[1].contains(line1.as_str()));
             assert!(msg[1].contains(user1.as_str()));
@@ -240,6 +261,60 @@ fn recall_tag_several_lines_test() {
         },
         _ => panic!(),
     }
+}
+
+#[test]
+fn untag_nonexisting_line_comlains_test() {
+    let mut kv = db::hashmap_kv::HashMapKV::new();
+    let channel = "my_channel".to_owned();
+    let tag = "#tag".to_owned();
+
+    let nonexisting_hash = "abbababe";
+    let untag_cmdline = format!("!untag {} {}", tag, nonexisting_hash);
+    let untag_event = Event::Event { time: UTC::now(), event: ChatEvent::ChannelMsg {
+        channel: channel.clone(),
+        from: "user3".to_owned(),
+        msg: untag_cmdline } };
+
+    match tag_bot(untag_event, &mut kv) {
+        Some(Effect::Effect(ChatEffect::ChannelMsg { msg, .. })) => {
+            let error = format!("Unable to find line tagged with {} and with hash {}", tag, nonexisting_hash);
+            assert_eq!(msg[0], error);
+        },
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn untag_line_test() {
+    let mut kv = db::hashmap_kv::HashMapKV::new();
+    let channel = "my_channel".to_owned();
+    let tag = "#tag".to_owned();
+
+    let line1 = format!("a test line {}", tag);
+    let time1 = UTC::now() - Duration::hours(3);
+    let user1 = "user1".to_owned();
+    let line1_hash = hash(&line1);
+    run_tag_bot_for_line_in_channel(&time1, &channel, &user1, &line1, &mut kv);
+
+    let expected_key = mk_key(&channel, &tag, &line1_hash);
+    assert!(kv.get(&expected_key).unwrap().is_some());
+
+    let untag_cmdline = format!("!untag {} {}", tag, line1_hash);
+    let untag_event = Event::Event { time: UTC::now(), event: ChatEvent::ChannelMsg {
+        channel: channel.clone(),
+        from: "user3".to_owned(),
+        msg: untag_cmdline } };
+
+    match tag_bot(untag_event, &mut kv) {
+        Some(Effect::Effect(ChatEffect::ChannelMsg { msg, .. })) => {
+            assert_eq!(msg[0], format!("Removed tag {} from line: {}", tag, line1));
+        }
+        _ => panic!(),
+    }
+
+    let expected_key = mk_key(&channel, &tag, &line1_hash);
+    assert!(kv.get(&expected_key).unwrap().is_none());
 }
 
 #[cfg(test)]
