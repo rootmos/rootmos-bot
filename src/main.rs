@@ -75,7 +75,13 @@ fn list_cmd<KV>(channel: String, tag: String, kv: &KV) -> ChatEffect where KV: d
     tagged_lines.sort_by(|a, b| a.time.cmp(&b.time));
 
     let mut msg = tagged_lines.iter()
-        .map(|l| format!("{} (by: {}, at: {})", &l.line, &l.user, &l.time.with_timezone(&Local).to_rfc2822()))
+        .map(|l| format!(
+                "{} (by: {}, at: {}, untag: \"!untag {} {}\")",
+                &l.line,
+                &l.user,
+                &l.time.with_timezone(&Local).to_rfc2822(),
+                &tag,
+                &l.hash))
         .collect::<Vec<String>>();
     msg.insert(0, format!("Listing tag {}:", tag));
     ChatEffect::ChannelMsg { channel: channel, msg: msg }
@@ -90,10 +96,10 @@ fn tag_line<KV>(time: DateTime<UTC>, user: String, channel: String, tag: String,
         time: time,
         user: user,
         line: line,
-        hash: line_hash};
+        hash: line_hash.clone()};
     let json = serde_json::to_string(&tagged_line).unwrap();
     kv.put(&key, &json).unwrap();
-    let response = vec![format!("Line tagged, recall using: !list {}", tag)];
+    let response = vec![format!("Line tagged, recall using: \"!list {}\", untag using \"!untag {} {}\"", tag, tag, line_hash)];
     ChatEffect::ChannelMsg { channel: channel, msg: response }
 }
 
@@ -164,8 +170,9 @@ fn save_line_with_tag_test(line: String, tag: String) {
         msg: line.clone() } };
 
     match tag_bot(input, &mut kv) {
-        Some(Effect::Effect(ChatEffect::ChannelMsg { channel: to_channel, .. })) => {
-            assert_eq!(to_channel, channel)
+        Some(Effect::Effect(ChatEffect::ChannelMsg { channel: to_channel, msg })) => {
+            assert_eq!(to_channel, channel);
+            assert!(msg[0].contains(hash(&line).as_str()));
         },
         _ => panic!(),
     }
@@ -221,16 +228,19 @@ fn recall_tag_several_lines_test() {
     let line1 = format!("a test line {}", tag);
     let time1 = UTC::now() - Duration::hours(3);
     let user1 = "user1".to_owned();
+    let hash1 = hash(&line1);
     run_tag_bot_for_line_in_channel(&time1, &channel, &user1, &line1, &mut kv);
 
     let line2 = format!("another {} test line", tag);
     let time2 = time1 + Duration::hours(1);
     let user2 = "user2".to_owned();
+    let hash2 = hash(&line2);
     run_tag_bot_for_line_in_channel(&time2, &channel, &user2, &line2, &mut kv);
 
     let line3 = format!("{} yet another line", tag);
     let time3 = time2 + Duration::hours(1);
     let user3 = "user3".to_owned();
+    let hash3 = hash(&line3);
     run_tag_bot_for_line_in_channel(&time3, &channel, &user3, &line3, &mut kv);
 
     assert!(time1 < time2);
@@ -250,14 +260,17 @@ fn recall_tag_several_lines_test() {
             assert!(msg[1].contains(line1.as_str()));
             assert!(msg[1].contains(user1.as_str()));
             assert!(msg[1].contains(&time1.with_timezone(&Local).to_rfc2822()));
+            assert!(msg[1].contains(hash1.as_str()));
 
             assert!(msg[2].contains(line2.as_str()));
             assert!(msg[2].contains(user2.as_str()));
             assert!(msg[2].contains(&time2.with_timezone(&Local).to_rfc2822()));
+            assert!(msg[2].contains(hash2.as_str()));
 
             assert!(msg[3].contains(line3.as_str()));
             assert!(msg[3].contains(user3.as_str()));
             assert!(msg[3].contains(&time3.with_timezone(&Local).to_rfc2822()));
+            assert!(msg[3].contains(hash3.as_str()));
         },
         _ => panic!(),
     }
